@@ -877,13 +877,16 @@ checksum = "436b050e76ed2903236f032a59761c1eb99e1b0aead2c257922771dab1fc8c78"
 
 [[package]]
 name = "rust-chemdraw-xlsx"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "log",
  "log4rs",
  "ole",
  "regex",
+ "serde",
+ "serde-xml-rs",
+ "serde_json",
  "structopt",
  "uuid",
  "xlsxwriter",
@@ -925,6 +928,18 @@ checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float",
  "serde",
+]
+
+[[package]]
+name = "serde-xml-rs"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb3aa78ecda1ebc9ec9847d5d3aba7d618823446a049ba2491940506da6e2782"
+dependencies = [
+ "log",
+ "serde",
+ "thiserror",
+ "xml-rs",
 ]
 
 [[package]]
@@ -1430,6 +1445,12 @@ dependencies = [
  "chrono",
  "libxlsxwriter-sys",
 ]
+
+[[package]]
+name = "xml-rs"
+version = "0.8.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52839dc911083a8ef63efa4d039d1f58b5e409f923e44c80828f206f66e5541c"
 
 [[package]]
 name = "yaml-rust"

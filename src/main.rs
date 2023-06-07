@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 #[allow(unused_imports)]
 #[allow(dead_code)]
 use std::{
@@ -6,8 +7,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::args::Opt;
-use regex::Regex;
+use crate::{
+    args::Opt,
+    xml::{parse_relation_xml, parse_sheet_xml},
+};
 use shell::Shell;
 use structopt::StructOpt;
 use uuid::Uuid;
@@ -16,6 +19,7 @@ use xlsxwriter::{prelude::FormatAlignment, worksheet::ImageOptions, Format, Work
 mod args;
 mod config;
 mod shell;
+mod xml;
 
 fn obj2smiles(obj: &PathBuf) -> String {
     if let Ok(ole_file) = ole::OleFile::from_file_blocking(obj) {
@@ -26,15 +30,12 @@ fn obj2smiles(obj: &PathBuf) -> String {
                     let cdx = format!("/tmp/{}.cdx", Uuid::new_v4().to_string());
                     let _ = fs::write(&cdx, &content).unwrap();
                     let shell = Shell::new("/tmp");
+                    // let res = shell.run(&format!("obabel -icdx {} -ocan -xk", &cdx));
                     let res = shell.run(&format!("obabel -icdx {} -ocan", &cdx));
                     let _ = std::fs::remove_file(&cdx);
                     if res.is_ok() {
                         let s = res.ok().unwrap();
-                        // let res = shell.run(&format!("obabel -:\"{}\" -ocan", s.trim()));
-                        // if res.is_ok() {
-                        //     let s = res.ok().unwrap();
                         return s.trim().to_string();
-                        // }
                     }
 
                     log::info!("{} error!!", obj.display())
@@ -51,16 +52,42 @@ pub fn file_exist(path: &str) -> bool {
     std::fs::metadata(path).is_ok()
 }
 
-fn to_usize(s: &str) -> usize {
-    let re = Regex::new(r"\D").unwrap();
-    let r = re.replace_all(s, "").to_string();
-    match r.parse::<usize>() {
-        Ok(n) => n,
-        Err(_) => 0,
+#[derive(Default, Clone)]
+struct Cell {
+    pub smiles: String,
+    pub file_name: String,
+    pub row: usize,
+    #[allow(dead_code)]
+    pub col: usize,
+}
+
+fn get_cell(
+    entry: &PathBuf,
+    relation_map: &HashMap<String, String>,
+    id_map: &HashMap<String, (usize, usize)>,
+) -> Cell {
+    let smiles: String = obj2smiles(&entry);
+    let file_name = entry
+        .as_path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    // log::info!("rel = {:?} id= {}", relation_map, &file_name);
+    let id = relation_map.get(&file_name).unwrap();
+    let r = id_map.get(id).unwrap();
+    let row = r.0;
+    let col = r.1;
+    Cell {
+        smiles,
+        row,
+        col,
+        file_name,
     }
 }
 
-fn to_new_xlsx(data: &Vec<String>, output: &str) {
+fn to_new_xlsx(data: &Vec<Cell>, output: &str) {
     let workbook = Workbook::new(output).unwrap();
     let mut sheet = workbook.add_worksheet(None).unwrap();
     let mut format1 = Format::new();
@@ -85,7 +112,7 @@ fn to_new_xlsx(data: &Vec<String>, output: &str) {
             &tmp_dir,
             chrono::Local::now().timestamp_nanos()
         );
-        let command = &format!("obabel -:\"{}\" -O {}", f.trim(), &img);
+        let command = &format!("obabel -:\"{}\" -O {}", &f.smiles, &img);
         // log::info!("img = {}, {}", &img, command);
         let _ = shell.run(command);
         sheet
@@ -101,9 +128,14 @@ fn to_new_xlsx(data: &Vec<String>, output: &str) {
                 },
             )
             .unwrap();
-        sheet.set_row(y, 240., Some(&format1)).unwrap();
+        sheet.set_row(f.row as u32, 240., Some(&format1)).unwrap();
 
-        sheet.write_string(y, 1, f, Some(&format1)).unwrap();
+        sheet
+            .write_string(f.row as u32, 1, &f.smiles, Some(&format1))
+            .unwrap();
+        sheet
+            .write_string(f.row as u32, 2, &f.file_name, Some(&format1))
+            .unwrap();
         y += 1;
     });
 
@@ -140,6 +172,7 @@ fn main() -> Result<(), Error> {
     // let tmp_dir = format!("data/tmp");
 
     let target_dir = Path::new(&tmp_dir);
+    let _ = fs::create_dir_all(&tmp_dir);
 
     for i in 0..archive.len() {
         let mut file = archive.by_index(i).unwrap();
@@ -149,35 +182,45 @@ fn main() -> Result<(), Error> {
             let _ = fs::create_dir_all(target_path.parent().unwrap());
             let mut output_file = File::create(&target_path).unwrap();
             std::io::copy(&mut file, &mut output_file).unwrap();
+        } else if file.name().starts_with("xl/worksheets/sheet1.xml") {
+            let target_path = target_dir.join("sheet1.xml");
+            let mut output_file = File::create(&target_path).unwrap();
+            std::io::copy(&mut file, &mut output_file).unwrap();
+        } else if file
+            .name()
+            .starts_with("xl/worksheets/_rels/sheet1.xml.rels")
+        {
+            let target_path = target_dir.join("sheet1_relation.xml");
+            let mut output_file = File::create(&target_path).unwrap();
+            std::io::copy(&mut file, &mut output_file).unwrap();
         }
     }
 
     // 读取生成的 cdx文件列表
-    let mut entries = fs::read_dir(target_dir.join("xl/embeddings/"))?
+    let entries = fs::read_dir(target_dir.join("xl/embeddings/"))?
         .map(|res| res.map(|e| e.path()))
         .collect::<Result<Vec<_>, Error>>()?;
 
-    // 按字母顺序对文件路径进行排序
-    entries.sort_by_key(|a| {
-        if let Some(file_name) = a.file_name() {
-            let s = file_name.to_string_lossy().to_string();
-            to_usize(&s)
-        } else {
-            0
-        }
-    });
-
-    let mut vv: Vec<String> = vec![];
+    let mut vv: Vec<Cell> = vec![];
+    let releation_map = parse_relation_xml(target_dir.join("sheet1_relation.xml"));
+    let id_map = parse_sheet_xml(target_dir.join("sheet1.xml"));
     // 输出文件列表
     for entry in entries {
         if let Some(_) = entry.file_name().and_then(|name| name.to_str()) {
-            let s = obj2smiles(&entry);
+            let s = get_cell(&entry, &releation_map, &id_map);
             vv.push(s.clone());
-            println!("{}", &s);
+            // println!("{}, {}, {}", &s.smiles, s.row, s.col);
         } else {
             return Err(Error::new(ErrorKind::InvalidData, "Invalid file name"));
         }
     }
+
+    vv.sort_by_key(|f| f.row);
+
+    vv.iter().for_each(|s| {
+        // println!("{}, {}, {}, {}", &s.smiles, s.row, s.col, &s.file_name);
+        println!("{}", &s.smiles);
+    });
 
     let _ = fs::remove_dir_all(tmp_dir);
 
