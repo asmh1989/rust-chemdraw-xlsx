@@ -1,7 +1,7 @@
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "chem_2_smiles")]
+#[structopt(name = "rust-chemdraw-xlsx")]
 pub struct Opt {
     #[structopt(short = "v", long, help = "显示版本")]
     pub version: bool,
