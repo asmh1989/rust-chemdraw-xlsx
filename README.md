@@ -19,3 +19,4 @@ OPTIONS:
 
 > `-i`: 必须的输入, xlsx文件路径
 > `-o`: 可选, 后面添加输出文件名
+> `25` 上可以直接运行`rust-chemdraw-xlsx`
